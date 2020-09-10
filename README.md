@@ -175,6 +175,22 @@ Issued: 2020-09-10T11:04:40.079326
 Expires: 2020-09-10T12:04:40
 Expires in: 3600 seconds
 ```
+## Using the helper in the Zeppelin Interpreter
+
+Just add the following as first paragraph. It loads the java helper, establishes a connection with the PGX server using the provided authenticated information and creates the session and analyst objects.
+
+```
+%pgx
+:load tools/PgxToken/PgxToken.java
+instance=PgxToken.getInstance("http://localhost:7007","scott","tiger")
+session=instance.createSession('Zeppelin');
+analyst=session.createAnalyst()
+print ("Connected to PGX server: "+instance.getBaseUrl());
+print ("PGX server version: "+instance.getVersion().getReleaseVersion()+" build:"+instance.getVersion().build);
+print ("PGX server API Version: "+instance.getVersion().getApiVersion());
+print ("PGQL version: "+instance.getVersion().getPgqlVersion());
+print ("variables instance, session and analyst ready to use");
+```
 
 ## Typical errors
 
