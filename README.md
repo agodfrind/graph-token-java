@@ -119,14 +119,9 @@ analyst ==> NamedArgumentAnalyst[session=91b9ff99-b3c6-4c8c-af0e-54c7e11a72c2]
 opg-jshell> var token=PgxToken.getToken("http://localhost:7007","scott","tiger");
 token ==> PgxToken@1caf77f6
 ```
-or
-```
-opg-jshell> var token=new PgxToken("http://localhost:7007","scott","tiger");
-token ==> PgxToken@59463bab
-```
 #### Use the token to get an instance:
 ```
-opg-jshell> instance = Pgx.getInstance("http://localhost:7007",token.getToken());
+opg-jshell> instance = Pgx.getInstance("http://localhost:7007",token.getValue());
 instance ==> ServerInstance[embedded=false,baseUrl=http://localhost:7007]
 ```
 #### Then get a session and analyst:
