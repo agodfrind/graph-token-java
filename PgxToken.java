@@ -1,3 +1,5 @@
+//package token;
+
 import com.fasterxml.jackson.core.*;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
@@ -6,9 +8,13 @@ import oracle.pgx.common.*;
 import java.io.*;
 import java.net.*;
 import javax.naming.AuthenticationException;
+import java.time.*;
 import java.util.Base64;
 
-package token;
+/**
+ * This class provides helper methods for using the new authentication mechanism introduced
+ * in Oracle Graph 20.3
+ */
 
 public class PgxToken {
 
@@ -16,17 +22,14 @@ public class PgxToken {
   private String baseUrl = null;
   private String username = null;
   private String password = null;
-  private java.util.Date issued = null;
+  private LocalDateTime issued = null;
 
-  private static String bold (String t) {
-    String BOLD = "\033[1m";
-    String NORMAL = "\033[0m";
-    return BOLD+t+NORMAL;
-  }
+  /**
 
-  public PgxToken () {
-  }
-
+  @param baseUrl The URL of the PGX server providing the authentication
+  @param username The username to authenticate
+  @param password The password of that username
+  */
   public PgxToken (String baseUrl, String username, String password)
   throws Exception {
     this.baseUrl = baseUrl;
@@ -35,6 +38,37 @@ public class PgxToken {
     refresh ();
   }
 
+  /**
+  Returns a {@link ServerInstance} object authenticated using the provided user name and password.
+  It first obtains an authentication token from the PGX server, then establishes a connection with
+  the PGX server using that token, and returns a ServerInstance object.
+  @param baseUrl The URL of the PGX server providing the authentication
+  @param username The username to authenticate
+  @param password The password of that username
+  @return a {@link ServerInstance} object.
+  */
+  public static ServerInstance getInstance (String baseUrl, String username, String password)
+  throws Exception {
+    PgxToken token = new PgxToken (baseUrl, username, password);
+    return Pgx.getInstance (baseUrl,token.getValue());
+  }
+
+  /**
+  Returns a {@link PgxToken} object authenticated using the provided user name and password.
+  @param baseUrl The URL of the PGX server providing the authentication
+  @param username The username to authenticate
+  @param password The password of that username
+  @return a {@link PgxToken} object.
+  */
+  public static PgxToken getToken (String baseUrl, String username, String password)
+  throws Exception {
+    PgxToken token = new PgxToken (baseUrl, username, password);
+    return token;
+  }
+
+  /**
+  Gets a new token from the PGX server. Use this method to refresh the token when it has expired.
+  */
   public void refresh ()
   throws Exception {
 
@@ -67,7 +101,7 @@ public class PgxToken {
       // Convert response to a JSON object
       ObjectMapper mapper = new ObjectMapper();
       tokenResponse = mapper.readTree(sb.toString());
-      issued = new java.util.Date();
+      issued = LocalDateTime.now();
 
     }
     else if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED)
@@ -76,10 +110,27 @@ public class PgxToken {
       throw new RuntimeException("error fetching authorization token. HTTP:"+responseCode);
   }
 
-  public String getUrl () {
+  /**
+  Returns the URL of the PGX server the token was obtained from.
+  @return a {@link String} with the server URL.
+  */
+  public String getBaseUrl () {
     return baseUrl;
   }
 
+  /**
+  Returns the name of the user the token was obtained for.
+  @return a {@link String} with the user name.
+  */
+  public String getUsername() {
+    return username;
+  }
+
+  /**
+  Returns the value of the authentication token
+  Pass it to the Pgx.getInstance() method.
+  @return a {@link String} with the token.
+  */
   public String getValue ()
   throws Exception {
     if (tokenResponse == null)
@@ -89,6 +140,46 @@ public class PgxToken {
     return tokenValue;
   }
 
+  /**
+  Returns the timestamp when the authentication token was issued
+  @return a {@link LocalDateTime} with the issue timestamp.
+  */
+  public LocalDateTime getIssued () {
+    if (tokenResponse == null)
+      return null;
+    return issued;
+  }
+
+  /**
+  Returns the expiration timestamp of the authentication token in Java LocalDateTime.
+  @return a {@link LocalDateTime} with the expiration timestamp.
+  */
+  public LocalDateTime getExpiration ()
+  throws Exception {
+    if (tokenResponse == null)
+      return null;
+    return LocalDateTime.ofEpochSecond(getExpirationSec(),0,OffsetDateTime.now().getOffset());
+  }
+
+  /**
+  Returns the expiration timestamp of the authentication token in seconds
+  (as seconds from the Unix epoch, 01-SEP-1970 00:00:00)
+  @return a {@link Long} with the expiration timestamp in seconds.
+  */
+  public long getExpirationSec ()
+  throws Exception {
+    if (tokenResponse == null)
+      return 0;
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode payload = mapper.readTree(getPayload());
+    long expirationSec = payload.get("exp").longValue();
+    return expirationSec;
+  }
+
+  /**
+  Returns the total lifetime of the authentication token in seconds.
+  @return a {@link Long} with the token lifetime.
+  */
   public long getLifetime () {
     if (tokenResponse == null)
       return 0;
@@ -96,6 +187,10 @@ public class PgxToken {
     return lifetimeSec;
   }
 
+  /**
+  Returns the remaining lifetime of the authentication token in seconds.
+  @return a {@link Long} with the remaining token lifetime.
+  */
   public long getRemainingTime ()
   throws Exception {
     if (tokenResponse == null)
@@ -103,6 +198,23 @@ public class PgxToken {
     return getExpirationSec() - System.currentTimeMillis()/1000l;
   }
 
+  /**
+  Returns whether the token has expired (true/false).
+  @return a {@link Boolean} indicating whether the token has expired
+  */
+  public boolean isExpired ()
+  throws Exception {
+    if (tokenResponse == null)
+      return true;
+    return ((getExpirationSec() < System.currentTimeMillis()/1000l));
+  }
+
+  /**
+  Returns the header of the authentication token.
+  The authentication token is formed of three base64-encoded strings.
+  The first one contains the token "header". This method decodes the header and returns the decoded JSON string.
+  @return a {@link String} with the token header.
+  */
   public String getHeader ()
   throws Exception {
     if (tokenResponse == null)
@@ -117,6 +229,12 @@ public class PgxToken {
     return header;
   }
 
+  /**
+  Returns the payload of the authentication token.
+  The authentication token is formed of three base64-encoded strings.
+  The second one contains the token "payload". This method decodes the payload and returns the decoded JSON string.
+  @return a {@link String} with the token payload.
+  */
   public String getPayload ()
   throws Exception {
     if (tokenResponse == null)
@@ -129,86 +247,61 @@ public class PgxToken {
     return payload;
   }
 
-  public long getExpirationSec ()
-  throws Exception {
-    if (tokenResponse == null)
-      return 0;
-    ObjectMapper mapper = new ObjectMapper();
-    JsonNode payload = mapper.readTree(getPayload());
-    long expirationSec = payload.get("exp").longValue();
-    return expirationSec;
-  }
-
-  public java.util.Date getExpiration ()
+  /**
+  Returns the signature of the authentication token.
+  The authentication token is formed of three base64-encoded strings.
+  The third one contains the token "signature". This method returns the signature in base64 encoding.
+  @return a {@link String} with the token signature.
+  */
+  public String getSignature ()
   throws Exception {
     if (tokenResponse == null)
       return null;
-    long expirationSec = getExpirationSec();
-    return new java.util.Date(expirationSec*1000L);
+    String token = getValue();
+    // Split the token into parts
+    String[] parts = token.split("\\.");
+    // Decode third part (signature)
+    String signature = parts[2];
+    return signature;
   }
 
-  public java.util.Date getIssued () {
+  /**
+  Returns the formatted JSON string response.
+  @return a {@link String} with the token response.
+  */
+  public String toString() {
     if (tokenResponse == null)
       return null;
-    return issued;
+    else
+      return tokenResponse.toString();
   }
 
-  public boolean isExpired ()
+  /**
+  Prints full details about the token.
+  Shows the full JSON token response received from the PGX server, as well as the decoded
+  header, payload and signature, when it was issued, and when it expires.
+  */
+  public void dump()
   throws Exception {
     if (tokenResponse == null)
-      return true;
-    return ((getExpirationSec() < System.currentTimeMillis()/1000l));
-  }
-
-  public ServerInstance getInstance()
-  throws Exception {
-    if (tokenResponse == null)
-      return null;
-    return Pgx.getInstance (baseUrl,getValue());
-  }
-
-  public static ServerInstance getInstance (String baseUrl, String username, String password)
-  throws Exception {
-    PgxToken token = new PgxToken (baseUrl, username, password);
-    return token.getInstance ();
-  }
-
-  public static PgxToken getToken (String baseUrl, String username, String password)
-  throws Exception {
-    PgxToken token = new PgxToken (baseUrl, username, password);
-    return token;
-  }
-
-  public void show ()
-  throws Exception {
-    if (tokenResponse == null)
-      System.out.println(bold("No token requested"));
+      System.out.println("No token requested");
     else {
-      System.out.println(bold("Token: ")+tokenResponse);
-      System.out.println(bold("Header: ")+getHeader());
-      System.out.println(bold("Payload: ")+getPayload());
-      System.out.println(bold("Lifetime: ")+getLifetime()+" seconds");
-      System.out.println(bold("Issued: ")+getIssued());
+      System.out.println("Token Response: "+tokenResponse);
+      System.out.println("Token Value: "+getValue());
+      System.out.println("- Header: "+getHeader());
+      System.out.println("- Payload: "+getPayload());
+      System.out.println("- Signature: "+getSignature());
+      System.out.println("Lifetime: "+getLifetime()+" seconds");
+      System.out.println("Issued: "+getIssued());
       if (isExpired()) {
-        System.out.println(bold("Token is Expired"));
-        System.out.println(bold("Expired: ")+getExpiration());
-        System.out.println(bold("Expired ")+(System.currentTimeMillis()/1000l - getExpirationSec())+" seconds ago");
+        System.out.println("Token is Expired");
+        System.out.println("Expired: "+getExpiration());
+        System.out.println("Expired "+(System.currentTimeMillis()/1000l - getExpirationSec())+" seconds ago");
       }
       else {
-        System.out.println(bold("Expires: ")+getExpiration());
-        System.out.println(bold("Expires in: ")+(getExpirationSec() - System.currentTimeMillis()/1000l)+" seconds");
+        System.out.println("Expires: "+getExpiration());
+        System.out.println("Expires in: "+(getExpirationSec() - System.currentTimeMillis()/1000l)+" seconds");
       }
-    }
-  }
-
-  public void showInstance(ServerInstance instance)
-  throws Exception {
-    if (instance != null) {
-      VersionInfo v = instance.getVersion();
-      System.out.println(bold("PGX server url: ")+getUrl());
-      System.out.println(bold("PGX server version: ")+v.getReleaseVersion()+bold(" type: ")+v.getServerType());
-      System.out.println(bold("PGX server API version: ")+v.getApiVersion());
-      System.out.println(bold("PGQL version: ")+v.getPgqlVersion());
     }
   }
 
